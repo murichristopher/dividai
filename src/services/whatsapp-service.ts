@@ -84,7 +84,7 @@ class WhatsAppService {
         sender: {
           name: contact.pushname,
           id: number,
-          photo_url: "a"
+          photo_url: ""
         }
       }
     }
