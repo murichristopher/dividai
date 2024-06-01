@@ -1,5 +1,5 @@
-import { IDebt, IDebtService, IMessageHandler } from "../types";
-import { IMessage } from "../services/whatsapp-service";
+import { IDebt, IMessage, IDebtService, IMessageHandler } from "../types";
+
 interface IParams {
   createDebitService: IDebtService
 }
@@ -10,17 +10,16 @@ class DebitMessageHandler implements IMessageHandler {
   constructor({ createDebitService }: IParams) {
     this.createDebitService = createDebitService;
   }
+
   onMessage(message: IMessage): void {
-    console.log("cachorro safado")
     if (this.isDebtCommandMessage(message.content)) {
-      const debt = this.parseMessageToDebt(message)
+      const debt = this.parseMessageToDebt(message);
 
       this.createDebitService.call(debt)
     }
 
     return;
   }
-
 
   private isDebtCommandMessage(message: string): boolean {
     return message.startsWith("/debit")
@@ -29,20 +28,10 @@ class DebitMessageHandler implements IMessageHandler {
   private parseMessageToDebt(message: IMessage): IDebt {
     const args = message.content.slice(6).trim();
     const parts = args.split(' ');
-    const value = parseFloat(parts[1].replace(",",".")); // TODO: lidar com cenário de espaços em branco
+    const value = parseFloat(parts[1].replace(",", ".")); // TODO: lidar com cenário de espaços em branco
+    const name = parts.slice(2).join(' ');
 
-    const subArray = parts.slice(2);
-
-    const name = subArray.join(' ');
-
-    const formatter = new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-
-    const res = {
+    return {
       description: name,
       debtor: {
         phone_number: message?.sender?.id!,
@@ -55,15 +44,11 @@ class DebitMessageHandler implements IMessageHandler {
         name: message?.mentionedPerson?.name!,
       },
       date: this.formatDateToCustomPattern(),
-      value: formatter.format(value)
+      value: this.formatAmount(value)
     };
-
-    console.log("resposta final", res)
-
-    return res
   }
 
-  formatDateToCustomPattern() {
+  private formatDateToCustomPattern() {
     const date = new Date();
 
     const year = date.getFullYear();
@@ -73,6 +58,14 @@ class DebitMessageHandler implements IMessageHandler {
     return `${year}-${day}-${month}`;
   }
 
+  private formatAmount(amount: number) {
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount)
+  }
 }
 
 export default DebitMessageHandler

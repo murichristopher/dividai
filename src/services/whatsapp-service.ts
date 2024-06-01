@@ -1,25 +1,13 @@
 import WAWebJS, { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
 import axios from 'axios';
-import { IMessageHandler } from '../types';
+import { IDebt, IMessage, IMessageFormatter, IMessageHandler } from '../types';
 import qrcode from 'qrcode-terminal'
+import S3Service from './s3-service';
+import appInstance from '../app';
+
 interface IParams {
   messageHandler: IMessageHandler
 }
-const wwebVersion = '2.2412.54';
-export interface IMessage {
-  content: string
-  sender?: {
-    name?: string
-    id?: string
-    photo_url: string
-  }
-  mentionedPerson?: {
-    name?: string
-    id?: string
-    photo_url?: string
-  }
-}
-
 class WhatsAppService {
   public messageHandler: IMessageHandler;
   private client: Client;
@@ -32,8 +20,9 @@ class WhatsAppService {
           '--no-sandbox',
           '--disable-setuid-sandbox',
         ],
-      }
-      });
+      },
+      authStrategy: new LocalAuth()
+    });
 
     console.log("Starting whatsapp client...")
 
@@ -52,11 +41,9 @@ class WhatsAppService {
     this.client.on('message', async (message) => {
       if (!this.isAllowedMessage(message)) { return; }
 
-      console.log("mensagem permitida!!!!")
-
       const formattedMessage = await this.formatMessage(message)
 
-      this.messageHandler.onMessage(formattedMessage)
+      this.messageHandler.onMessage(formattedMessage);
     });
 
     this.client.initialize();
@@ -67,69 +54,55 @@ class WhatsAppService {
   }
 
   private async formatMessage(message: WAWebJS.Message): Promise<IMessage> {
-    const contact = await message.getContact();
-    const number = await contact.getFormattedNumber();
+    const sender = await message.getContact();
+    const senderFormattedPhoneNumber = await sender.getFormattedNumber();
+    const senderPhotoUrl = await sender.getProfilePicUrl();
 
-
-    console.log("ESSES FORAM MENCIONADOS", message.mentionedIds)
-
-
-    const re = message.mentionedIds[0] as unknown as string
-    console.log("re", re)
-
-    if (re === undefined) {
-
-      return {
-        content: message.body,
-        sender: {
-          name: contact.pushname,
-          id: number,
-          photo_url: ""
-        }
-      }
-    }
-
-    const mentionedPerson = await this.client.getContactById(re)
-    const cliente = await message.getChat()
-
-
-    const photo_url = await contact.getProfilePicUrl();
-    const photo_urlMentionedPerson = await mentionedPerson.getProfilePicUrl();
-    const mentionedPersonNumber = await mentionedPerson.getFormattedNumber();
+    const firstMentionedId = message.mentionedIds[0] as unknown as string
+    const mentionedPerson = await this.client.getContactById(firstMentionedId)
+    const mentionedPersonPhotoUrl = await mentionedPerson.getProfilePicUrl();
+    const mentionedPersonFromattedPhoneNumber = await mentionedPerson.getFormattedNumber();
 
     return {
       content: message.body,
       sender: {
-        name: contact.pushname,
-        id: number,
-        photo_url: photo_url
+        name: sender.pushname,
+        id: senderFormattedPhoneNumber,
+        photo_url: senderPhotoUrl
       },
       mentionedPerson: {
         name: mentionedPerson.pushname || mentionedPerson.verifiedName,
-        id: mentionedPersonNumber,
-        photo_url: photo_urlMentionedPerson
+        id: mentionedPersonFromattedPhoneNumber,
+        photo_url: mentionedPersonPhotoUrl
       }
     }
   }
 
-
-  async getImageAsBase64(url: string) {
-    const response = await axios.get(url, {
-      responseType: 'arraybuffer'
-    });
-    return Buffer.from(response.data, 'binary').toString('base64');
-  }
-
-  async sendImage(client: WAWebJS.Chat, recipientId: string, imageUrl: string, caption: string) {
+  async fetchContactByPhoneNumber(phoneNumber: string) {
     try {
-      const imageBase64 = await this.getImageAsBase64(imageUrl);
-      const media = new MessageMedia('image/jpeg', imageBase64, 'image.jpg');
-      console.log('Image sent successfully!');
+      const sanitized_number = phoneNumber.toString().replace(/[- )(]/g, "");
+
+      const sanitized_number_final = sanitized_number.startsWith('0') ? sanitized_number.substring(1) : sanitized_number;
+
+      const final_number = `55${sanitized_number_final}`;
+
+      const numberDetails = await this.client.getNumberId(final_number);
+
+      const contact = await this.client.getContactById(numberDetails?._serialized!);
+
+      const whatsapp_photo_url = await contact.getProfilePicUrl();
+
+      return {
+        name: contact.pushname,
+        phone_number: contact.number,
+        about: await contact.getAbout(),
+        photo_url: whatsapp_photo_url
+      }
     } catch (error) {
-      console.error('Failed to send image:', error);
+      console.log("error searching contact", error)
+      return null;
     }
   }
-
 }
 
 export default WhatsAppService;

@@ -1,22 +1,53 @@
+import axios from "axios";
+import appInstance from "../app";
 import { Debt } from "../models/debt"
-import { IDebt, IDebtService } from "../types"
-import WhatsAppService from "./whatsapp-service"
+import type { IDebt, IDebtService } from "../types"
+import CreateContactService from "./contact-service";
 
+type CreditorAndDebtor = IDebt["creditor"] | IDebt["debtor"];
 class CreateDebitService implements IDebtService {
-  async call(debt: IDebt): Promise<any> {
-    console.log("pronto para mandar para o banco de dados")
+  private contactService: CreateContactService;
 
-    const newDebt = new Debt(debt)
+  constructor() {
+    this.contactService = new CreateContactService();
+  }
+
+  async call(debt: IDebt) {
+    const newDebt = new Debt(debt);
 
     try {
-      const res = await newDebt.save();
+      await this.updateCreditorAndDebtorsPhotoUrls(debt.creditor, debt.debtor)
 
-      console.log("deu tudo certo", res)
-      return res;
+      await this.createCreditorAndDebtorContacts(debt.creditor, debt.debtor)
+      return await newDebt.save();
     } catch (e) {
-      console.error("algo deu bem ruim", e)
-      return;
+      throw new Error("Failed to create debt");
     }
+  }
+
+  private createCreditorAndDebtorContacts(creditor: IDebt["creditor"], debtor: IDebt["debtor"]) {
+    return Promise.all([
+      this.contactService.call(creditor),
+      this.contactService.call(debtor)
+    ]);
+  }
+
+  private async updateCreditorAndDebtorsPhotoUrls(creditor: IDebt["creditor"], debtor: IDebt["debtor"]) {
+    creditor.photo_url = await this.uploadAndGetS3Url(creditor)
+    debtor.photo_url = await this.uploadAndGetS3Url(debtor)
+  }
+
+  private async uploadAndGetS3Url({ photo_url, phone_number }: CreditorAndDebtor) {
+    const s3Service = appInstance.getS3Service();
+
+    const { data } = await axios.get(photo_url, {
+      responseType: 'arraybuffer',
+    });
+
+    return await s3Service.uploadImageAndReturnUrl({
+      fileName: phone_number.split(" ").join(""),
+      image: Buffer.from(data, 'binary')
+    })
   }
 }
 
